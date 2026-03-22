@@ -1,21 +1,12 @@
 import React, { useState } from 'react';
 import { motion } from 'framer-motion';
-import { Chrome, Sun, Moon, ArrowRight } from 'lucide-react';
+import { Chrome, Sun, Moon, ArrowRight, Eye, EyeOff } from 'lucide-react';
 import { useAuthStore } from '../store';
 import { useTheme } from '../hooks/useTheme';
 import { Background } from '../components/ui/Background';
 import { GlassInput } from '../components/ui/GlassInput';
 import { Button } from '../components/ui/button';
-import toast from 'react-hot-toast';
-import type { User } from '../types';
-
-const MOCK_USER: User = {
-  id: 'user-1',
-  name: 'Alex Johnson',
-  email: 'alex@example.com',
-  avatar: 'https://api.dicebear.com/8.x/avataaars/svg?seed=Alex',
-  provider: 'credentials',
-};
+import { showToast } from '../utils/toast';
 
 interface SignupPageProps {
   onSwitchToLogin: () => void;
@@ -25,8 +16,9 @@ export const SignupPage: React.FC<SignupPageProps> = ({ onSwitchToLogin }) => {
   const { login } = useAuthStore();
   const { theme, toggleTheme } = useTheme();
   const [isLoading, setIsLoading] = useState(false);
+  const [showPassword, setShowPassword] = useState(false);
+  const [showConfirm, setShowConfirm] = useState(false);
   const [formData, setFormData] = useState({
-    username: '',
     email: '',
     password: '',
     confirmPassword: '',
@@ -35,7 +27,6 @@ export const SignupPage: React.FC<SignupPageProps> = ({ onSwitchToLogin }) => {
 
   const validate = () => {
     const newErrors: Record<string, string> = {};
-    if (!formData.username.trim()) newErrors.username = 'Username is required';
     if (!formData.email.trim()) {
       newErrors.email = 'Email is required';
     } else if (!/\S+@\S+\.\S+/.test(formData.email)) {
@@ -47,6 +38,9 @@ export const SignupPage: React.FC<SignupPageProps> = ({ onSwitchToLogin }) => {
     if (formData.password !== formData.confirmPassword) {
       newErrors.confirmPassword = 'Passwords do not match';
     }
+    if (Object.keys(newErrors).length > 0) {
+      showToast('Please fill all fields', 'error');
+    }
     setErrors(newErrors);
     return Object.keys(newErrors).length === 0;
   };
@@ -56,19 +50,34 @@ export const SignupPage: React.FC<SignupPageProps> = ({ onSwitchToLogin }) => {
     if (!validate()) return;
 
     setIsLoading(true);
-    // Simulate API call
-    await new Promise((r) => setTimeout(r, 1500));
-    login({ ...MOCK_USER, name: formData.username, email: formData.email });
-    setIsLoading(false);
-    toast.success('Account created successfully!');
+    try {
+      const res = await fetch('http://localhost:5000/api/auth/signup', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(formData),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.message || data.error || 'Signup failed');
+
+      const userData = data.data ?? data;
+      localStorage.setItem('auth_token', userData.token);
+      login({
+        id: userData.user.id,
+        name: userData.user.email.split('@')[0],
+        email: userData.user.email,
+        avatar: `https://api.dicebear.com/8.x/avataaars/svg?seed=${encodeURIComponent(userData.user.email)}`,
+        provider: 'credentials',
+      });
+      showToast(data.message || 'Account created successfully!', 'success');
+    } catch (err: unknown) {
+      showToast(err instanceof Error ? err.message : 'Signup failed', 'error');
+    } finally {
+      setIsLoading(false);
+    }
   };
 
-  const handleGoogleSignup = async () => {
-    setIsLoading(true);
-    await new Promise((r) => setTimeout(r, 1200));
-    login(MOCK_USER);
-    setIsLoading(false);
-    toast.success('Signed up with Google');
+  const handleGoogleSignup = () => {
+    window.location.href = 'http://localhost:5000/api/auth/google';
   };
 
   return (
@@ -102,13 +111,6 @@ export const SignupPage: React.FC<SignupPageProps> = ({ onSwitchToLogin }) => {
 
           <form onSubmit={handleSignup} className="space-y-4">
             <GlassInput
-              label="Username"
-              placeholder="johndoe"
-              value={formData.username}
-              onChange={(e) => setFormData({ ...formData, username: e.target.value })}
-              error={errors.username}
-            />
-            <GlassInput
               label="Email"
               type="email"
               placeholder="john@example.com"
@@ -116,23 +118,59 @@ export const SignupPage: React.FC<SignupPageProps> = ({ onSwitchToLogin }) => {
               onChange={(e) => setFormData({ ...formData, email: e.target.value })}
               error={errors.email}
             />
+
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-              <GlassInput
-                label="Password"
-                type="password"
-                placeholder="••••••••"
-                value={formData.password}
-                onChange={(e) => setFormData({ ...formData, password: e.target.value })}
-                error={errors.password}
-              />
-              <GlassInput
-                label="Confirm"
-                type="password"
-                placeholder="••••••••"
-                value={formData.confirmPassword}
-                onChange={(e) => setFormData({ ...formData, confirmPassword: e.target.value })}
-                error={errors.confirmPassword}
-              />
+              {/* Password with toggle */}
+              <div className="w-full space-y-1.5">
+                <label className="text-xs font-bold uppercase tracking-widest text-slate-500 dark:text-slate-400 ml-1">
+                  Password
+                </label>
+                <div className="relative">
+                  <GlassInput
+                    type={showPassword ? 'text' : 'password'}
+                    placeholder="••••••••"
+                    value={formData.password}
+                    onChange={(e) => setFormData({ ...formData, password: e.target.value })}
+                    error={errors.password}
+                    className="pr-11"
+                  />
+                  <button
+                    type="button"
+                    onClick={() => setShowPassword((v) => !v)}
+                    className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600 dark:hover:text-slate-200 transition-colors"
+                    tabIndex={-1}
+                    aria-label={showPassword ? 'Hide password' : 'Show password'}
+                  >
+                    {showPassword ? <EyeOff size={17} /> : <Eye size={17} />}
+                  </button>
+                </div>
+              </div>
+
+              {/* Confirm password with toggle */}
+              <div className="w-full space-y-1.5">
+                <label className="text-xs font-bold uppercase tracking-widest text-slate-500 dark:text-slate-400 ml-1">
+                  Confirm
+                </label>
+                <div className="relative">
+                  <GlassInput
+                    type={showConfirm ? 'text' : 'password'}
+                    placeholder="••••••••"
+                    value={formData.confirmPassword}
+                    onChange={(e) => setFormData({ ...formData, confirmPassword: e.target.value })}
+                    error={errors.confirmPassword}
+                    className="pr-11"
+                  />
+                  <button
+                    type="button"
+                    onClick={() => setShowConfirm((v) => !v)}
+                    className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600 dark:hover:text-slate-200 transition-colors"
+                    tabIndex={-1}
+                    aria-label={showConfirm ? 'Hide confirm password' : 'Show confirm password'}
+                  >
+                    {showConfirm ? <EyeOff size={17} /> : <Eye size={17} />}
+                  </button>
+                </div>
+              </div>
             </div>
 
             <Button

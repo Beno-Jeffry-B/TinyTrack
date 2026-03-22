@@ -5,10 +5,9 @@ import { memo } from 'react';
 interface OrbIndicatorProps {
   clicks: number;
   maxClicks: number;
-  status: 'Active' | 'Dormant' | 'Expired';
 }
 
-const OrbIndicator: React.FC<OrbIndicatorProps> = ({ clicks, maxClicks, status }) => {
+const OrbIndicator: React.FC<OrbIndicatorProps> = ({ clicks, maxClicks }) => {
   // Balanced SaaS Sizing
   const minSize = 12;
   const maxSize = 38;
@@ -18,7 +17,6 @@ const OrbIndicator: React.FC<OrbIndicatorProps> = ({ clicks, maxClicks, status }
   let tier: 'low' | 'medium' | 'high' = 'low';
   if (ratio > 0.6) tier = 'high';
   else if (ratio > 0.1) tier = 'medium';
-  if (status === 'Dormant') tier = 'low';
 
   const scaledSize = Math.max(minSize, Math.floor(ratio * maxSize));
 
@@ -38,9 +36,7 @@ const OrbIndicator: React.FC<OrbIndicatorProps> = ({ clicks, maxClicks, status }
           // Clean SaaS Multi-tone Gradients
           tier === 'high' && "bg-gradient-to-br from-blue-500 to-blue-700 shadow-[0_4px_12px_rgba(59,130,246,0.3)]",
           tier === 'medium' && "bg-gradient-to-br from-indigo-400 to-indigo-600 shadow-[0_4px_8px_rgba(129,140,248,0.2)]",
-          tier === 'low' && (status === 'Active' ? "bg-gradient-to-br from-slate-400 to-slate-500" : "bg-gradient-to-br from-slate-200 to-slate-300"),
-          
-          status === 'Dormant' && "grayscale opacity-60 shadow-none scale-95"
+          tier === 'low' && "bg-gradient-to-br from-slate-400 to-slate-500"
         )}
         style={{ 
           width: `${scaledSize}px`, 

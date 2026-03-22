@@ -2,17 +2,22 @@ import React, { useState, useMemo, useEffect } from 'react';
 import type { LinkData, DeviceBreakdown, LocationBreakdown } from '../types';
 import {
   ClipboardCopy, Trash2, CalendarDays, MousePointerClick, TrendingUp,
-  Pencil, QrCode, Smartphone, Monitor, Tablet, Globe, X, Download, Timer, Clock
+  Pencil, QrCode, Smartphone, Monitor, Tablet, Globe, X, Download, Clock, Users
 } from 'lucide-react';
-import { formatDistanceToNow, format } from 'date-fns';
+import { formatDistanceToNow, format, isToday, isYesterday } from 'date-fns';
 import { cn } from '@/lib/utils';
 import { motion, AnimatePresence } from 'framer-motion';
 import { QRCodeCanvas } from 'qrcode.react';
 import { EditLinkModal } from './EditLinkModal';
 import { useLinksStore } from '../store';
-import toast from 'react-hot-toast';
+import type { AnalyticsData } from '../store';
+import { showToast } from '../utils/toast';
 import { AnalyticsSkeleton } from './Skeletons';
 import { useMediaQuery } from '../hooks/useMediaQuery';
+import { io } from 'socket.io-client';
+import { AreaChart, Area, XAxis, Tooltip, ResponsiveContainer } from 'recharts';
+
+const socket = io(import.meta.env.VITE_API_URL || 'http://localhost:5000');
 
 interface Props {
   link: LinkData | null;
@@ -20,29 +25,29 @@ interface Props {
   onOpenChange: (v: boolean) => void;
 }
 
-/* ── Sparkline ─────────────────────────────── */
-const Sparkline = ({ data }: { data: number[] }) => {
-  if (data.length < 2) return null;
-  const max = Math.max(...data, 1);
-  const min = Math.min(...data);
-  const W = 100; const H = 40;
-  const pts = data.map((v, i) => {
-    const x = (i / (data.length - 1)) * W;
-    const y = H - ((v - min) / (max - min || 1)) * H;
-    return `${x},${y}`;
-  }).join(' ');
-  return (
-    <svg viewBox={`0 0 ${W} ${H}`} preserveAspectRatio="none" className="w-full h-14 overflow-visible">
-      <defs>
-        <linearGradient id="sg2" x1="0" x2="0" y1="0" y2="1">
-          <stop offset="0%" stopColor="rgba(37,99,235,0.25)" />
-          <stop offset="100%" stopColor="rgba(37,99,235,0)" />
-        </linearGradient>
-      </defs>
-      <polygon fill="url(#sg2)" points={`0,${H} ${pts} ${W},${H}`} />
-      <polyline fill="none" stroke="#2563eb" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round" points={pts} />
-    </svg>
-  );
+/* ── Custom Tooltip ─────────────────────────────── */
+const CustomTooltip = ({ active, payload, label, timeRange }: any) => {
+  if (active && payload && payload.length) {
+    const d = new Date(label);
+    
+    // Format clearly to requested text: "Time: 02:10 PM / Clicks: 2 clicks"
+    const displayTime = timeRange !== '1d'
+      ? d.toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' })
+      : d.toLocaleString('en-IN', { day: '2-digit', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit', hour12: true });
+
+    return (
+      <div className="glass-panel px-3 py-2 shadow-lg rounded-xl border border-white/20 dark:border-white/10">
+        <p className="text-[11px] font-bold tracking-widest text-slate-500 dark:text-slate-400 mb-1">
+          Time: <span className="text-slate-700 dark:text-slate-300">{displayTime}</span>
+        </p>
+        <p className="text-sm font-black text-slate-800 dark:text-slate-100 tabular-nums">
+          <span className="text-blue-500 mr-1.5 leading-none">•</span>
+          Clicks: {payload[0].value}
+        </p>
+      </div>
+    );
+  }
+  return null;
 };
 
 /* ── Device icon map ───────────────────────── */
@@ -54,26 +59,44 @@ const DeviceIcon: React.FC<{ device: string }> = ({ device }) => {
 
 /* ── Main Component ───────────────────────── */
 export const AnalyticsModal: React.FC<Props> = ({ link, isOpen, onOpenChange }) => {
-  const { deleteLink } = useLinksStore();
+  const { deleteLink, fetchAnalytics } = useLinksStore();
   const [isDeleting, setIsDeleting] = useState(false);
   const [showQr, setShowQr] = useState(false);
   const [showEdit, setShowEdit] = useState(false);
   const [activeTab, setActiveTab] = useState<'overview' | 'devices' | 'locations'>('overview');
+  const [timeRange, setTimeRange] = useState<import('../store').AnalyticsRange>('7d');
+  const [selectedDate, setSelectedDate] = useState(() => new Date().toISOString().split('T')[0]);
   const [isLoading, setIsLoading] = useState(false);
+  const [analytics, setAnalytics] = useState<AnalyticsData | null>(null);
   const isMobile = useMediaQuery('(max-width: 640px)');
 
-  // Prevent body scroll & simulate load
+  // Fetch analytics from API on open or when timeRange changes
   useEffect(() => {
-    if (isOpen) {
-      document.body.style.overflow = 'hidden';
-      // Simulate fetching insights
-      setIsLoading(true);
-      const timer = setTimeout(() => setIsLoading(false), 800);
-      return () => clearTimeout(timer);
-    } else {
-      document.body.style.overflow = 'unset';
-    }
-  }, [isOpen, link?.id]);
+    if (!isOpen || !link) return;
+    document.body.style.overflow = 'hidden';
+    setIsLoading(true);
+    setAnalytics(null);
+    fetchAnalytics(link.id, timeRange, selectedDate)
+      .then((data) => setAnalytics(data))
+      .catch(() => showToast('Failed to load analytics', 'error'))
+      .finally(() => setIsLoading(false));
+      
+    // Socket.IO Real-time Subscriptions
+    socket.emit('join_url_room', link.id);
+
+    const handleUpdate = (data: { urlId: string; timestamp: string }) => {
+      if (data.urlId === link.id) {
+        fetchAnalytics(link.id, timeRange, selectedDate).then(setAnalytics);
+      }
+    };
+
+    socket.on('click_update', handleUpdate);
+
+    return () => { 
+      document.body.style.overflow = 'unset'; 
+      socket.off('click_update', handleUpdate);
+    };
+  }, [isOpen, link?.id, timeRange, selectedDate, fetchAnalytics]);
 
   useEffect(() => {
     return () => { document.body.style.overflow = 'unset'; };
@@ -94,12 +117,28 @@ export const AnalyticsModal: React.FC<Props> = ({ link, isOpen, onOpenChange }) 
     onOpenChange(false);
   };
 
-  const sparkData = useMemo(() => link?.recentVisits.map((v) => v.clicks) ?? [], [link]);
-  const firstVal = sparkData[0] ?? 0;
-  const lastVal = sparkData[sparkData.length - 1] ?? 0;
-  const trendPct = firstVal > 0 ? ((lastVal - firstVal) / firstVal) * 100 : 0;
+  const previousPeriodClicks = analytics?.previous_period_clicks ?? 0;
+  const currentPeriodClicks = useMemo(() => {
+    if (!analytics?.daily_trend?.length) return 0;
+    return analytics.daily_trend.reduce((sum, d) => sum + d.clicks, 0);
+  }, [analytics]);
 
+  const trendContent = useMemo(() => {
+    if (previousPeriodClicks === 0) {
+      if (currentPeriodClicks === 0) return 'No clicks';
+      return `+${currentPeriodClicks} (New)`;
+    }
+    const pct = ((currentPeriodClicks - previousPeriodClicks) / previousPeriodClicks) * 100;
+    return `${pct > 0 ? '+' : ''}${pct.toFixed(1)}%`;
+  }, [currentPeriodClicks, previousPeriodClicks]);
+
+  const isPositiveTrend = currentPeriodClicks >= previousPeriodClicks;
+  // Device breakdown from API
   const deviceBreakdown: DeviceBreakdown = useMemo(() => {
+    if (analytics?.device_breakdown?.length) {
+      return analytics.device_breakdown.map((d) => ({ device: d.device, count: d.count }));
+    }
+    // Fallback to recentVisits computation
     if (!link) return [];
     const counts: Record<string, number> = {};
     link.recentVisits.forEach((v) => {
@@ -107,9 +146,14 @@ export const AnalyticsModal: React.FC<Props> = ({ link, isOpen, onOpenChange }) 
     });
     return Object.entries(counts).map(([device, count]) => ({ device, count }))
       .sort((a, b) => b.count - a.count);
-  }, [link]);
+  }, [analytics, link]);
 
+  // Location breakdown from API — backend now resolves codes to display names
   const locationBreakdown: LocationBreakdown = useMemo(() => {
+    if (analytics?.location_breakdown?.length) {
+      return analytics.location_breakdown.map((l) => ({ location: l.country, count: l.count }));
+    }
+    // Fallback to recentVisits computation
     if (!link) return [];
     const counts: Record<string, number> = {};
     link.recentVisits.forEach((v) => {
@@ -117,15 +161,18 @@ export const AnalyticsModal: React.FC<Props> = ({ link, isOpen, onOpenChange }) 
     });
     return Object.entries(counts).map(([location, count]) => ({ location, count }))
       .sort((a, b) => b.count - a.count);
-  }, [link]);
+  }, [analytics, link]);
 
   const totalForBreakdown = deviceBreakdown.reduce((s, d) => s + d.count, 0);
+
+  // Last visited: prefer API response, fallback to store
+  const lastVisited = analytics?.last_visited ?? link?.lastVisited ?? null;
 
   const handleDelete = async () => {
     if (!link) return;
     if (isDeleting) {
       await deleteLink(link.id);
-      toast.success('Link deleted');
+      showToast('Link deleted', 'success');
       handleClose();
     } else {
       setIsDeleting(true);
@@ -139,7 +186,7 @@ export const AnalyticsModal: React.FC<Props> = ({ link, isOpen, onOpenChange }) 
     a.download = `${link?.alias ?? 'qr'}.png`;
     a.href = canvas.toDataURL();
     a.click();
-    toast.success('QR code downloaded');
+    showToast('QR code downloaded', 'success');
   };
 
   const getFlag = (code: string) => {
@@ -206,7 +253,7 @@ export const AnalyticsModal: React.FC<Props> = ({ link, isOpen, onOpenChange }) 
                     </motion.button>
                     <motion.button
                       whileTap={{ scale: 0.9 }}
-                      onClick={() => { navigator.clipboard.writeText(link.shortUrl); toast.success('Copied!', { duration: 1500 }); }}
+                      onClick={() => { navigator.clipboard.writeText(link.shortUrl); showToast('Copied to clipboard!', 'success'); }}
                       className="p-3 sm:p-2 rounded-xl hover:bg-slate-100 dark:hover:bg-slate-800 text-slate-600 dark:text-slate-300 transition-all"
                       title="Copy"
                     >
@@ -262,19 +309,88 @@ export const AnalyticsModal: React.FC<Props> = ({ link, isOpen, onOpenChange }) 
                           {/* Sparkline */}
                           <section className="space-y-3">
                             <div className="flex items-center justify-between">
-                              <h4 className="text-[10px] font-bold uppercase tracking-widest text-slate-400 flex items-center gap-1.5">
-                                <TrendingUp size={13} className="text-blue-500" /> 7-day trend
-                              </h4>
+                              <div className="flex items-center gap-3">
+                                <h4 className="text-[10px] sm:text-[11px] font-bold uppercase tracking-widest text-slate-400 flex items-center gap-1.5 focus:outline-none">
+                                  <TrendingUp size={13} className="text-blue-500" /> Trend
+                                </h4>
+                                <div className="flex gap-2">
+                                  {timeRange === '1d' && (
+                                    <input
+                                      type="date"
+                                      value={selectedDate}
+                                      onChange={(e) => setSelectedDate(e.target.value)}
+                                      className="bg-slate-100 dark:bg-slate-800/50 rounded-lg px-2 py-0 border border-slate-200 dark:border-slate-700 text-[11px] font-bold text-slate-600 dark:text-slate-300 outline-none focus:ring-2 ring-blue-500/50"
+                                    />
+                                  )}
+                                  <div className="flex bg-slate-100 dark:bg-slate-800/50 rounded-lg p-0.5 border border-slate-200 dark:border-slate-700">
+                                    {(['1d', '7d', '1m', '1y'] as const).map((r) => (
+                                      <button
+                                        key={r}
+                                        onClick={() => setTimeRange(r)}
+                                        className={cn(
+                                          'px-2 py-1 text-[9px] font-bold uppercase rounded-md transition-all',
+                                          timeRange === r 
+                                            ? 'bg-white dark:bg-slate-700 text-blue-600 shadow-sm' 
+                                            : 'text-slate-500 hover:text-slate-700 dark:hover:text-slate-300'
+                                        )}
+                                      >
+                                        {r}
+                                      </button>
+                                    ))}
+                                  </div>
+                                </div>
+                              </div>
                               <span className={cn('text-[10px] font-bold px-2.5 py-0.5 rounded-full border',
-                                trendPct >= 0 ? 'text-emerald-700 bg-emerald-50 border-emerald-100' : 'text-rose-700 bg-rose-50 border-rose-100'
+                                currentPeriodClicks === 0 && previousPeriodClicks === 0
+                                  ? 'text-slate-500 bg-slate-100 border-slate-200 dark:bg-slate-800 dark:border-slate-700'
+                                  : isPositiveTrend ? 'text-emerald-700 bg-emerald-50 border-emerald-100 dark:text-emerald-400 dark:bg-emerald-900/30 dark:border-emerald-800' : 'text-rose-700 bg-rose-50 border-rose-100 dark:text-rose-400 dark:bg-rose-900/30 dark:border-rose-800'
                               )}>
-                                {trendPct >= 0 ? '+' : ''}{trendPct.toFixed(1)}%
+                                {trendContent}
                               </span>
                             </div>
                             <motion.div initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }}
-                              className="glass-panel px-5 pt-4 pb-2 shadow-sm border-white/20 dark:border-white/10"
+                              className="glass-panel px-5 pt-4 pb-2 shadow-sm border-white/20 dark:border-white/10 h-48 sm:h-56 relative group/chart"
                             >
-                              <Sparkline data={sparkData} />
+                              {!analytics?.daily_trend?.length ? (
+                                <div className="absolute inset-0 flex items-center justify-center">
+                                  <p className="text-slate-400 font-bold text-sm tracking-wider uppercase">No data for this day</p>
+                                </div>
+                              ) : (
+                                <ResponsiveContainer width="100%" height="100%">
+                                  <AreaChart data={analytics.daily_trend} margin={{ top: 5, right: 0, left: 0, bottom: 5 }}>
+                                    <defs>
+                                      <linearGradient id="colorClicks" x1="0" y1="0" x2="0" y2="1">
+                                        <stop offset="5%" stopColor="#3b82f6" stopOpacity={0.3}/>
+                                        <stop offset="95%" stopColor="#3b82f6" stopOpacity={0}/>
+                                      </linearGradient>
+                                    </defs>
+                                    <XAxis 
+                                      dataKey="date" 
+                                      axisLine={false} 
+                                      tickLine={false} 
+                                      tickFormatter={(val) => {
+                                        const d = new Date(val);
+                                        return timeRange !== '1d'
+                                          ? d.toLocaleDateString('en-IN', { day: '2-digit', month: 'short' })
+                                          : d.toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit', hour12: true });
+                                      }}
+                                      tick={{ fontSize: 10, fill: '#8ca3af', fontWeight: 700 }} 
+                                      dy={10} 
+                                    />
+                                    <Tooltip content={<CustomTooltip timeRange={timeRange} />} cursor={{ stroke: 'rgba(59,130,246,0.2)', strokeWidth: 2, strokeDasharray: '4 4' }} />
+                                    <Area 
+                                      type="monotone" 
+                                      dataKey="clicks" 
+                                      stroke="#3b82f6" 
+                                      strokeWidth={3}
+                                      fillOpacity={1} 
+                                      fill="url(#colorClicks)" 
+                                      dot={{ r: 4, fill: '#ffffff', stroke: '#3b82f6', strokeWidth: 2 }}
+                                      activeDot={{ r: 6, fill: '#3b82f6', stroke: '#ffffff', strokeWidth: 2, className: "drop-shadow-[0_0_8px_rgba(59,130,246,0.6)]" }}
+                                    />
+                                  </AreaChart>
+                                </ResponsiveContainer>
+                              )}
                             </motion.div>
                           </section>
 
@@ -297,12 +413,12 @@ export const AnalyticsModal: React.FC<Props> = ({ link, isOpen, onOpenChange }) 
                             <div className="p-5 sm:p-6 glass-panel flex-1 flex flex-col justify-center shadow-none border-white/20 dark:border-white/10">
                               <div className="flex gap-4">
                                 <div className="p-4 sm:p-3 bg-white dark:bg-slate-800 rounded-2xl shadow-sm border border-slate-100 dark:border-slate-700">
-                                  <Timer size={24} className="sm:size-5 text-emerald-500 dark:text-emerald-400" />
+                                  <Users size={24} className="sm:size-5 text-purple-500 dark:text-purple-400" />
                                 </div>
                                 <div>
-                                  <p className="text-sm sm:text-xs font-bold text-slate-500 dark:text-slate-400 uppercase tracking-wider mb-1">Status</p>
-                                  <p className="text-base sm:text-sm font-bold text-slate-800 dark:text-slate-100 leading-snug pt-1">
-                                    {formatDistanceToNow(new Date(link.lastVisited), { addSuffix: true })}
+                                  <p className="text-sm sm:text-xs font-bold text-slate-500 dark:text-slate-400 uppercase tracking-wider mb-1">Unique Visitors</p>
+                                  <p className="text-4xl sm:text-3xl font-black text-slate-800 dark:text-slate-100 tabular-nums leading-none">
+                                    {analytics?.unique_visitors?.toLocaleString() ?? '—'}
                                   </p>
                                 </div>
                               </div>
@@ -322,7 +438,9 @@ export const AnalyticsModal: React.FC<Props> = ({ link, isOpen, onOpenChange }) 
                               <div>
                                 <p className="text-[11px] sm:text-[10px] font-bold text-slate-500 dark:text-slate-400 uppercase tracking-wider">Last Visited</p>
                                 <p className="text-sm font-semibold text-slate-700 dark:text-slate-200">
-                                  {formatDistanceToNow(new Date(link.lastVisited), { addSuffix: true })}
+                                  {lastVisited
+                                    ? formatDistanceToNow(new Date(lastVisited), { addSuffix: true })
+                                    : '—'}
                                 </p>
                               </div>
                             </div>
@@ -333,24 +451,43 @@ export const AnalyticsModal: React.FC<Props> = ({ link, isOpen, onOpenChange }) 
                           <section className="space-y-4 border-t border-slate-100 dark:border-slate-800 pt-6">
                             <h4 className="text-[11px] font-bold uppercase tracking-widest text-slate-500 dark:text-slate-400">Visitor History</h4>
                             <div className="space-y-3">
-                              {link.recentVisits.map((v, i) => (
-                                <motion.div key={i}
-                                  initial={{ opacity: 0, x: 8 }} animate={{ opacity: 1, x: 0 }}
-                                  transition={{ delay: i * 0.04 }}
-                                  className="flex justify-between items-center px-5 py-4 rounded-2xl glass-panel shadow-none border-white/20 dark:border-white/10 hover:bg-white/20 dark:hover:bg-white/10 transition-all"
-                                >
-                                  <div className="flex items-center gap-3">
-                                    {v.device && <div className="p-2 bg-white/50 dark:bg-black/20 rounded-lg"><DeviceIcon device={v.device} /></div>}
-                                    <div>
-                                      <p className="text-sm font-bold text-slate-800 dark:text-slate-200">{format(new Date(v.date), 'MMM d, yyyy')}</p>
-                                      {v.browser && <p className="text-[11px] font-medium text-slate-500 dark:text-slate-400 uppercase tracking-tighter">{v.browser}{v.location ? ` · ${getCountryName(v.location)}` : ''}</p>}
+                              {(!analytics?.recent_history || analytics.recent_history.length === 0) ? (
+                                <div className="text-center py-8">
+                                  <p className="text-slate-400 font-bold tracking-wider text-sm">No visitors yet</p>
+                                </div>
+                              ) : (
+                                analytics.recent_history.map((v, i) => (
+                                  <motion.div key={i}
+                                    initial={{ opacity: 0, x: 8 }} animate={{ opacity: 1, x: 0 }}
+                                    transition={{ delay: i * 0.04 }}
+                                    className="flex justify-between items-center px-5 py-4 rounded-2xl glass-panel shadow-none border-white/20 dark:border-white/10 hover:bg-white/20 dark:hover:bg-white/10 transition-all"
+                                  >
+                                    <div className="flex items-center gap-3">
+                                      {v.device && <div className="p-2 bg-white/50 dark:bg-black/20 rounded-lg"><DeviceIcon device={v.device.toLowerCase()} /></div>}
+                                      <div>
+                                        <p className="text-sm font-bold text-slate-800 dark:text-slate-200">
+                                          {(() => {
+                                            const d = new Date(v.date);
+                                            const tStr = d.toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit', hour12: true });
+                                            if (isToday(d)) return `Today, ${tStr}`;
+                                            if (isYesterday(d)) return `Yesterday, ${tStr}`;
+                                            return `${d.toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' })}, ${tStr}`;
+                                          })()}
+                                        </p>
+                                        <div className="flex items-center gap-1.5 mt-0.5 opacity-80">
+                                            {v.location && <span className="text-[14px] leading-none">{getFlag(v.location)}</span>}
+                                            <p className="text-[11px] font-medium text-slate-500 dark:text-slate-400 uppercase tracking-tighter">
+                                              {v.device} {v.location ? `· ${v.location}` : ''}
+                                            </p>
+                                        </div>
+                                      </div>
                                     </div>
-                                  </div>
-                                  <span className="text-base font-black text-slate-900 dark:text-white tabular-nums px-3 py-1 bg-white dark:bg-slate-800 border border-slate-100 dark:border-slate-700 rounded-xl shadow-sm">
-                                    {v.clicks}
-                                  </span>
-                                </motion.div>
-                              ))}
+                                    <span className="flex-shrink-0 text-slate-400">
+                                      {formatDistanceToNow(new Date(v.date), { addSuffix: true })}
+                                    </span>
+                                  </motion.div>
+                                ))
+                              )}
                             </div>
                           </section>
                         </>
@@ -422,11 +559,9 @@ export const AnalyticsModal: React.FC<Props> = ({ link, isOpen, onOpenChange }) 
                 </div>
 
                 {/* ── Footer actions ── */}
-                <div className="px-6 py-5 border-t border-white/10 dark:border-white/5 flex-shrink-0 flex flex-col sm:flex-row items-center justify-between gap-4">
-                  {isDeleting ? (
-                    <p className="text-sm font-bold text-rose-600 dark:text-rose-400">Are you sure you want to delete?</p>
-                  ) : (
-                    <p className="text-xs font-bold uppercase tracking-widest text-slate-500 dark:text-slate-500">Registry ID: {link.id}</p>
+                <div className="px-6 py-5 border-t border-white/10 dark:border-white/5 flex-shrink-0 flex items-center justify-end">
+                  {isDeleting && (
+                    <p className="text-sm font-bold text-rose-600 dark:text-rose-400 mr-auto">Are you sure you want to delete?</p>
                   )}
                   <motion.button
                     whileHover={{ scale: 1.02 }}

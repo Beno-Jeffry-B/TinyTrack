@@ -3,6 +3,7 @@ import { useAuthStore, useLinksStore } from './store';
 import { useTheme } from './hooks/useTheme';
 import { LoginPage } from './pages/LoginPage';
 import { SignupPage } from './pages/SignupPage';
+import { AuthCallbackPage } from './pages/AuthCallbackPage';
 import { LinkCard } from './components/LinkCard';
 import { GlassSelect } from './components/ui/GlassSelect';
 import { GlassDatePicker } from './components/ui/GlassDatePicker';
@@ -21,6 +22,9 @@ import { Toaster } from 'react-hot-toast';
 import toast from 'react-hot-toast';
 
 import { Background } from './components/ui/Background';
+import { io } from 'socket.io-client';
+
+const socket = io(import.meta.env.VITE_API_URL || 'http://localhost:5000');
 
 // ── Dashboard ──────────────────────────────────────────────────────────
 function Dashboard() {
@@ -32,7 +36,6 @@ function Dashboard() {
   const [showAdd, setShowAdd] = useState(false);
   const [showCsv, setShowCsv] = useState(false);
   const [fetchError, setFetchError] = useState(false);
-  const [statusFilter, setStatusFilter] = useState<'All' | 'Active' | 'Dormant' | 'Expired'>('All');
   const [sortOption, setSortOption] = useState<'clicks-desc' | 'clicks-asc' | 'date-desc' | 'visit-desc'>('date-desc');
   const [dateFrom, setDateFrom] = useState('');
   const [dateTo, setDateTo] = useState('');
@@ -42,10 +45,33 @@ function Dashboard() {
   useEffect(() => {
     if (!user) return;
     setFetchError(false);
+    
+    // Initial load
     fetchLinks(user.id).catch(() => {
       setFetchError(true);
       toast.error('Failed to load links. Please retry.');
     });
+  }, [user, fetchLinks]);
+
+  // Join Socket.io rooms for all active links
+  useEffect(() => {
+    links.forEach((link) => {
+      socket.emit('join_url_room', link.id);
+    });
+  }, [links]);
+
+  // Listen for live click updates globally
+  useEffect(() => {
+    if (!user) return;
+    
+    const handleUpdate = () => {
+      fetchLinks(user.id).catch(() => {});
+    };
+
+    socket.on('click_update', handleUpdate);
+    return () => {
+      socket.off('click_update', handleUpdate);
+    };
   }, [user, fetchLinks]);
 
   const handleRetry = useCallback(() => {
@@ -74,11 +100,10 @@ function Dashboard() {
     const q = searchQuery.toLowerCase();
     let result = links.filter((l) => {
       const matchesQuery = l.shortUrl.toLowerCase().includes(q) || l.originalUrl.toLowerCase().includes(q);
-      const matchesStatus = statusFilter === 'All' || l.status === statusFilter;
       let matchesDate = true;
       if (dateFrom) matchesDate = matchesDate && new Date(l.createdAt) >= new Date(dateFrom);
       if (dateTo) matchesDate = matchesDate && new Date(l.createdAt) <= new Date(dateTo + 'T23:59:59');
-      return matchesQuery && matchesStatus && matchesDate;
+      return matchesQuery && matchesDate;
     });
 
     result.sort((a, b) => {
@@ -90,14 +115,15 @@ function Dashboard() {
     });
 
     return result;
-  }, [links, searchQuery, statusFilter, sortOption, dateFrom, dateTo]);
+  }, [links, searchQuery, sortOption, dateFrom, dateTo]);
 
   const maxClicks = useMemo(() => Math.max(...links.map((l) => l.clicks), 0), [links]);
 
   return (
     <div className="min-h-screen text-slate-900 dark:text-slate-100 font-sans selection:bg-blue-100 dark:selection:bg-blue-900 selection:text-blue-900 pb-24 overflow-x-hidden relative transition-colors duration-300">
       <Background />
-      <Toaster position="top-right" toastOptions={{
+      <Toaster position="top-center" toastOptions={{
+        duration: 3000,
         style: { borderRadius: '12px', fontWeight: '600', fontSize: '13px' },
       }} />
 
@@ -116,11 +142,6 @@ function Dashboard() {
           <motion.div initial={{ opacity: 0, scale: 0.9 }} animate={{ opacity: 1, scale: 1 }} transition={{ type: 'spring', stiffness: 400, damping: 28 }}
             className="flex items-center gap-3 flex-wrap"
           >
-            {/* User avatar */}
-            <div className="flex items-center gap-2 glass-panel px-3 py-2 shadow-sm rounded-xl">
-              <img src={user?.avatar} alt={user?.name} className="w-6 h-6 rounded-full border border-slate-200 dark:border-slate-700" />
-              <span className="text-xs font-bold text-slate-900 dark:text-slate-100 hidden sm:block">{user?.name}</span>
-            </div>
             <button onClick={toggleTheme} className="p-2.5 rounded-xl glass-panel text-slate-700 dark:text-slate-200 transition-all hover:brightness-110" title="Toggle theme">
               {theme === 'dark' ? <Sun size={16} /> : <Moon size={16} />}
             </button>
@@ -151,20 +172,6 @@ function Dashboard() {
                 onChange={(e) => setSearchQuery(e.target.value)}
                 className="w-full glass-input rounded-xl pl-11 pr-4 py-3.5 text-sm font-bold text-slate-900 dark:text-slate-100 placeholder:text-slate-500 dark:placeholder:text-slate-400 focus:ring-4 focus:ring-blue-500/10 outline-none"
               />
-            </div>
-            <div className="flex gap-2 p-1 glass-panel rounded-xl">
-              {(['All', 'Active', 'Dormant', 'Expired'] as const).map((s) => (
-                <button
-                  key={s}
-                  onClick={() => setStatusFilter(s)}
-                  className={`px-3 py-2 rounded-lg text-xs font-bold tracking-wide transition-all border ${statusFilter === s
-                    ? 'bg-white/40 dark:bg-black/40 text-slate-900 dark:text-white border-white/20 dark:border-white/10 shadow-sm'
-                    : 'bg-transparent text-slate-600 dark:text-slate-300 border-transparent hover:bg-white/20 dark:hover:bg-black/20'
-                    }`}
-                >
-                  {s}
-                </button>
-              ))}
             </div>
           </div>
 
@@ -271,14 +278,45 @@ function Dashboard() {
 
 // ── Root with Auth Guard ───────────────────────────────────────────────
 export default function App() {
-  const { user } = useAuthStore();
+  const { user, verifySession } = useAuthStore();
   const [authMode, setAuthMode] = useState<'login' | 'signup'>('login');
+  const [isVerifying, setIsVerifying] = useState(true);
 
-  if (user) return <Dashboard />;
+  useEffect(() => {
+    verifySession().finally(() => setIsVerifying(false));
+  }, [verifySession]);
 
-  return authMode === 'login' ? (
-    <LoginPage onSwitchToSignup={() => setAuthMode('signup')} />
-  ) : (
-    <SignupPage onSwitchToLogin={() => setAuthMode('login')} />
+  // Handle Google OAuth callback: /auth/callback?token=...
+  if (window.location.pathname === '/auth/callback') {
+    return <AuthCallbackPage />;
+  }
+
+  if (isVerifying) {
+    return (
+      <div className="min-h-screen flex items-center justify-center bg-slate-50 dark:bg-slate-900">
+        <div className="w-8 h-8 border-4 border-blue-500 border-t-transparent rounded-full animate-spin"></div>
+      </div>
+    );
+  }
+
+  return (
+    <>
+      {/* Global Toaster — always mounted so toasts work on Login/Signup too */}
+      <Toaster
+        position="top-center"
+        toastOptions={{
+          duration: 3000,
+          style: { borderRadius: '12px', fontWeight: '600', fontSize: '13px' },
+        }}
+      />
+
+      {user ? (
+        <Dashboard />
+      ) : authMode === 'login' ? (
+        <LoginPage onSwitchToSignup={() => setAuthMode('signup')} />
+      ) : (
+        <SignupPage onSwitchToLogin={() => setAuthMode('login')} />
+      )}
+    </>
   );
 }

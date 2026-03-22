@@ -2,6 +2,21 @@ import { create } from 'zustand';
 import { persist } from 'zustand/middleware';
 import type { User, LinkData, CsvResult } from '../types';
 
+// ── Analytics types ────────────────────────────────────────────────────
+export type AnalyticsRange = '1d' | '7d' | '1m' | '1y';
+
+export interface AnalyticsData {
+  total_clicks: number;
+  unique_visitors: number;
+  previous_period_clicks: number;
+  last_visited: string | null;
+  created_at: string;
+  daily_trend: { date: string; clicks: number }[];
+  device_breakdown: { device: string; count: number }[];
+  location_breakdown: { country: string; count: number }[];
+  recent_history: { date: string; device: string; location: string }[];
+}
+
 // ── helpers ──────────────────────────────────────────────────────────
 const getDaysAgo = (days: number) => {
   const d = new Date();
@@ -67,6 +82,7 @@ interface AuthStore {
   user: User | null;
   login: (user: User) => void;
   logout: () => void;
+  verifySession: () => Promise<boolean>;
 }
 
 export const useAuthStore = create<AuthStore>()(
@@ -74,7 +90,38 @@ export const useAuthStore = create<AuthStore>()(
     (set) => ({
       user: null,
       login: (user) => set({ user }),
-      logout: () => set({ user: null }),
+      logout: () => {
+        set({ user: null });
+        localStorage.removeItem('auth_token');
+      },
+      verifySession: async () => {
+        const token = localStorage.getItem('auth_token');
+        if (!token) {
+          set({ user: null });
+          return false;
+        }
+        try {
+          const res = await fetch(`http://localhost:5000/api/auth/me`, {
+            headers: { Authorization: `Bearer ${token}` }
+          });
+          if (!res.ok) throw new Error('Session invalid');
+          const { data } = await res.json();
+          set({ 
+            user: {
+              id: data.user.id,
+              name: data.user.email.split('@')[0],
+              email: data.user.email,
+              avatar: `https://api.dicebear.com/8.x/avataaars/svg?seed=${encodeURIComponent(data.user.email)}`,
+              provider: 'credentials' // defaulting remote fetch provider assumption
+            }
+          });
+          return true;
+        } catch {
+          set({ user: null });
+          localStorage.removeItem('auth_token');
+          return false;
+        }
+      }
     }),
     { name: 'auth-store' }
   )
@@ -93,38 +140,75 @@ interface LinksStore {
   updateLink: (id: string, data: { originalUrl: string; expiryDate?: string | null }) => Promise<void>;
   deleteLink: (id: string) => Promise<void>;
   addFromCsv: (userId: string, rows: { originalUrl: string; alias?: string; expiryDate?: string }[]) => Promise<CsvResult[]>;
+  fetchAnalytics: (linkId: string, range?: AnalyticsRange, date?: string) => Promise<AnalyticsData>;
 }
+
+const API = 'http://localhost:5000/api';
+const getToken = () => localStorage.getItem('auth_token') ?? '';
+const authHeaders = () => ({
+  'Content-Type': 'application/json',
+  'Authorization': `Bearer ${getToken()}`,
+});
+
+/** Map backend URL row → frontend LinkData */
+const mapUrl = (row: Record<string, unknown>): LinkData => {
+  const isExpired = row.expires_at && new Date(row.expires_at as string) < new Date();
+  const clicks = (row.clicks as number) ?? 0;
+  // No updated_at column in urls table — use created_at as neutral fallback.
+  // Real last_visited is fetched from the analytics API (MAX clicks.timestamp).
+  const lastVisited = row.created_at as string;
+  const status: LinkData['status'] = isExpired
+    ? 'Expired'
+    : clicks === 0
+      ? 'Dormant'
+      : 'Active';
+  return {
+    id: row.id as string,
+    alias: row.short_code as string,
+    shortUrl: row.short_url as string,
+    originalUrl: row.original_url as string,
+    clicks,
+    lastVisited,
+    recentVisits: [],
+    status,
+    expiryDate: (row.expires_at as string) ?? null,
+    createdAt: row.created_at as string,
+    userId: row.user_id as string,
+  };
+};
 
 export const useLinksStore = create<LinksStore>()((set, get) => ({
   links: [],
   isLoading: false,
 
-  fetchLinks: async (userId) => {
+  fetchLinks: async (_userId) => {
     set({ isLoading: true });
-    await new Promise((r) => setTimeout(r, 700));
-    const seeded = SEED_LINKS.map((l) => ({ ...l, userId }));
-    set({ links: seeded, isLoading: false });
+    try {
+      const res = await fetch(`${API}/url`, { headers: authHeaders() });
+      if (!res.ok) throw new Error('Failed to fetch links');
+      const data: Record<string, unknown>[] = await res.json();
+      set({ links: data.map(mapUrl), isLoading: false });
+    } catch {
+      set({ isLoading: false });
+      throw new Error('Failed to load links');
+    }
   },
 
-  addLink: async (userId, { originalUrl, alias, expiryDate }) => {
-    // Uniqueness check
-    const exists = get().links.some((l) => l.alias === alias);
-    if (exists) throw new Error(`Alias "${alias}" is already taken`);
+  addLink: async (_userId, { originalUrl, alias, expiryDate }) => {
+    const res = await fetch(`${API}/url`, {
+      method: 'POST',
+      headers: authHeaders(),
+      body: JSON.stringify({
+        original_url: originalUrl,
+        custom_alias: alias?.trim() || undefined, // omit if empty → backend auto-generates
+        expiry_date: expiryDate || undefined,
+      }),
+    });
+    const body = await res.json();
+    if (!res.ok) throw new Error(body.message || body.error || 'Failed to create URL');
 
-    await new Promise((r) => setTimeout(r, 400));
-    const newLink: LinkData = {
-      id: Date.now().toString(),
-      alias,
-      shortUrl: `shrt.ly/${alias}`,
-      originalUrl,
-      clicks: 0,
-      lastVisited: new Date().toISOString(),
-      recentVisits: makeVisits(0),
-      status: 'Active',
-      expiryDate: expiryDate ?? null,
-      createdAt: new Date().toISOString(),
-      userId,
-    };
+    // Backend now returns { success, message, data: { ...urlRow } }
+    const newLink = mapUrl(body.data ?? body);
     set((s) => ({ links: [newLink, ...s.links] }));
     return newLink;
   },
@@ -139,7 +223,14 @@ export const useLinksStore = create<LinksStore>()((set, get) => ({
   },
 
   deleteLink: async (id) => {
-    await new Promise((r) => setTimeout(r, 300));
+    const res = await fetch(`${API}/url/${id}`, {
+      method: 'DELETE',
+      headers: authHeaders(),
+    });
+    if (!res.ok) {
+      const body = await res.json();
+      throw new Error(body.message || body.error || 'Failed to delete URL');
+    }
     set((s) => ({ links: s.links.filter((l) => l.id !== id) }));
   },
 
@@ -159,5 +250,14 @@ export const useLinksStore = create<LinksStore>()((set, get) => ({
       }
     }
     return results;
+  },
+
+  fetchAnalytics: async (linkId, range = '7d', date?: string) => {
+    let url = `${API}/url/${linkId}/analytics?range=${range}`;
+    if (date) url += `&date=${date}`;
+    const res = await fetch(url, { headers: authHeaders() });
+    const body = await res.json();
+    if (!res.ok) throw new Error(body.message || 'Failed to fetch analytics');
+    return body.data as AnalyticsData;
   },
 }));

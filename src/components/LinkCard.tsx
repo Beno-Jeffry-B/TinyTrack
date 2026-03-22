@@ -2,12 +2,11 @@ import React, { memo } from 'react';
 import type { LinkData } from '../types';
 import OrbIndicator from './OrbIndicator';
 import { Card } from '@/components/ui/card';
-import { Badge } from '@/components/ui/badge';
 import { ClipboardCopy, ExternalLink, CalendarDays, MousePointerClick, Timer } from 'lucide-react';
 import { formatDistanceToNow, isPast, parseISO } from 'date-fns';
 import { cn } from '@/lib/utils';
 import { motion } from 'framer-motion';
-import toast from 'react-hot-toast';
+import { showToast } from '../utils/toast';
 
 interface LinkCardProps {
   link: LinkData;
@@ -16,20 +15,13 @@ interface LinkCardProps {
   isActive?: boolean;
 }
 
-const statusStyle: Record<string, string> = {
-  Active: 'bg-emerald-50 text-emerald-600 border-emerald-100',
-  Dormant: 'bg-slate-100 text-slate-500 border-slate-200',
-  Expired: 'bg-amber-50 text-amber-600 border-amber-100',
-};
-
 export const LinkCard: React.FC<LinkCardProps> = memo(({ link, maxClicks, onClick, isActive }) => {
-  const isExpired = link.status === 'Expired' ||
-    (link.expiryDate != null && isPast(parseISO(link.expiryDate)));
+  const isExpired = link.expiryDate != null && isPast(parseISO(link.expiryDate));
 
   const handleCopy = (e: React.MouseEvent) => {
     e.stopPropagation();
     navigator.clipboard.writeText(link.shortUrl);
-    toast.success('Copied!', { duration: 1500 });
+    showToast('Copied to clipboard!', 'success');
   };
 
   return (
@@ -60,7 +52,7 @@ export const LinkCard: React.FC<LinkCardProps> = memo(({ link, maxClicks, onClic
         {/* Top row: orb + URL + badge */}
         <div className="flex items-start gap-4">
           <div className="flex-shrink-0 transition-transform group-hover:scale-105 duration-300">
-            <OrbIndicator clicks={link.clicks} maxClicks={maxClicks} status={link.status} />
+            <OrbIndicator clicks={link.clicks} maxClicks={maxClicks} />
           </div>
           <div className="flex-1 min-w-0 space-y-1.5 sm:space-y-1">
             <h3 className="text-lg sm:text-base font-bold text-slate-900 dark:text-slate-100 truncate leading-relaxed sm:leading-snug group-hover:text-blue-700 dark:group-hover:text-blue-400 transition-colors">
@@ -71,20 +63,15 @@ export const LinkCard: React.FC<LinkCardProps> = memo(({ link, maxClicks, onClic
               {link.originalUrl}
             </p>
           </div>
-          {!isExpired && (
-            <Badge className={cn('flex-shrink-0 px-2 py-0.5 rounded-full text-[10px] sm:text-[9px] font-bold uppercase tracking-wider border', statusStyle[link.status])}>
-              {link.status}
-            </Badge>
-          )}
         </div>
 
         {/* Bottom row: stats + copy */}
         <div className="flex items-center gap-4 pt-2 sm:pt-1 border-t border-slate-700/10 dark:border-slate-300/10 mt-auto">
           <span className={cn(
             'flex items-center gap-1.5 text-sm sm:text-[11px] font-bold text-slate-700 dark:text-slate-200 px-3 py-1.5 sm:px-2.5 sm:py-1 rounded-lg border border-black/5 dark:border-white/10 bg-black/5 dark:bg-black/30 transition-colors',
-            !isExpired && link.status === 'Active' && 'group-hover:bg-blue-500/10 dark:group-hover:bg-blue-400/10 group-hover:border-blue-500/20 dark:group-hover:border-blue-400/20 group-hover:text-blue-700 dark:group-hover:text-blue-400'
+            !isExpired && 'group-hover:bg-blue-500/10 dark:group-hover:bg-blue-400/10 group-hover:border-blue-500/20 dark:group-hover:border-blue-400/20 group-hover:text-blue-700 dark:group-hover:text-blue-400'
           )}>
-            <MousePointerClick size={14} className={link.status === 'Active' && !isExpired ? 'text-blue-500 dark:text-blue-400' : 'text-slate-500 dark:text-slate-400'} />
+            <MousePointerClick size={14} className={!isExpired ? 'text-blue-500 dark:text-blue-400' : 'text-slate-500 dark:text-slate-400'} />
             {link.clicks.toLocaleString()}
           </span>
           <span className="flex items-center gap-1.5 text-sm sm:text-[11px] font-medium text-slate-500 dark:text-slate-400">

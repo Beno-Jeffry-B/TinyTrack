@@ -1,0 +1,13 @@
+# This project is a Node.js backend.
+# Dependencies are natively managed via package.json and installed via "npm install".
+# However, based on our work so far, here is the list of required packages:
+
+bcrypt
+cors
+dotenv
+express
+jsonwebtoken
+passport
+passport-google-oauth20
+pg
+socket.io

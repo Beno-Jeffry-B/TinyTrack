@@ -2,7 +2,7 @@ import React, { useState } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { X, Link2, Calendar, Tag, AlertCircle } from 'lucide-react';
 import { useAuthStore, useLinksStore } from '../store';
-import toast from 'react-hot-toast';
+import { showToast } from '../utils/toast';
 import { FullScreenLoader } from './Skeletons';
 import { isValid, parseISO, isAfter } from 'date-fns';
 import { GlassDatePicker } from './ui/GlassDatePicker';
@@ -16,12 +16,14 @@ interface AddLinkModalProps {
 
 const validate = (url: string, alias: string, existingAliases: string[]) => {
   const errs: Record<string, string> = {};
-  try { new URL(url); } catch { errs.url = 'Enter a valid URL (include https://)'; }
-  if (!alias.trim()) {
-    errs.alias = 'Alias is required';
-  } else if (!/^[a-z0-9-]+$/.test(alias)) {
+  if (!url.trim()) {
+    errs.url = 'Enter a valid URL (include https://)';
+  } else {
+    try { new URL(url); } catch { errs.url = 'Enter a valid URL (include https://)'; }
+  }
+  if (alias.trim() && !/^[a-z0-9-]+$/.test(alias)) {
     errs.alias = 'Only lowercase letters, numbers and hyphens';
-  } else if (existingAliases.includes(alias.trim())) {
+  } else if (alias.trim() && existingAliases.includes(alias.trim())) {
     errs.alias = `Alias "${alias}" is already taken`;
   }
   return errs;
@@ -48,7 +50,10 @@ export const AddLinkModal: React.FC<AddLinkModalProps> = ({ isOpen, onClose }) =
       }
     }
     setErrors(errs);
-    if (Object.keys(errs).length > 0) return;
+    if (Object.keys(errs).length > 0) {
+      if (errs.url) showToast('Enter a valid URL', 'error');
+      return;
+    }
 
     setIsSubmitting(true);
     try {
@@ -57,11 +62,11 @@ export const AddLinkModal: React.FC<AddLinkModalProps> = ({ isOpen, onClose }) =
         alias: alias.trim(),
         expiryDate: expiry || null,
       });
-      toast.success(`Created: ${link.shortUrl}`);
+      showToast(`Short URL created successfully: ${link.shortUrl}`, 'success');
       setUrl(''); setAlias(''); setExpiry(''); setErrors({});
       onClose();
     } catch (err: unknown) {
-      toast.error((err as Error).message);
+      showToast((err as Error).message || 'Failed to create URL', 'error');
     } finally {
       setIsSubmitting(false);
     }
@@ -122,7 +127,7 @@ export const AddLinkModal: React.FC<AddLinkModalProps> = ({ isOpen, onClose }) =
             {/* Alias field */}
             <div className="space-y-1.5">
               <label className="text-xs font-bold uppercase tracking-widest text-slate-600 dark:text-slate-200 flex items-center gap-1.5">
-                <Tag size={12} /> Custom Alias
+                <Tag size={12} /> Custom Alias <span className="text-slate-500 dark:text-slate-400 normal-case font-medium">(optional)</span>
               </label>
               <div className={cn(
                 "flex items-center w-full rounded-xl transition-all border outline-none overflow-hidden group/alias",
