@@ -10,6 +10,7 @@ import { motion, AnimatePresence } from 'framer-motion';
 import { QRCodeCanvas } from 'qrcode.react';
 import { EditLinkModal } from './EditLinkModal';
 import { useLinksStore } from '../store';
+import { getFlagEmoji } from '../utils/getFlagEmoji';
 import type { AnalyticsData } from '../store';
 import { showToast } from '../utils/toast';
 import { AnalyticsSkeleton } from './Skeletons';
@@ -151,7 +152,9 @@ export const AnalyticsModal: React.FC<Props> = ({ link, isOpen, onOpenChange }) 
   // Location breakdown from API — backend now resolves codes to display names
   const locationBreakdown: LocationBreakdown = useMemo(() => {
     if (analytics?.location_breakdown?.length) {
-      return analytics.location_breakdown.map((l) => ({ location: l.country, count: l.count }));
+      return analytics.location_breakdown
+        .map((l) => ({ location: l.country, count: l.count }))
+        .sort((a, b) => b.count - a.count);
     }
     // Fallback to recentVisits computation
     if (!link) return [];
@@ -189,22 +192,6 @@ export const AnalyticsModal: React.FC<Props> = ({ link, isOpen, onOpenChange }) 
     showToast('QR code downloaded', 'success');
   };
 
-  const getFlag = (code: string) => {
-    if (!code || code.length !== 2) return '🏳️';
-    const codePoints = code
-      .toUpperCase()
-      .split('')
-      .map(char => 127397 + char.charCodeAt(0));
-    return String.fromCodePoint(...codePoints);
-  };
-
-  const getCountryName = (code: string) => {
-    try {
-      return new Intl.DisplayNames(['en'], { type: 'region' }).of(code) || code;
-    } catch {
-      return code;
-    }
-  };
 
   if (!link && !isOpen) return null;
 
@@ -475,7 +462,7 @@ export const AnalyticsModal: React.FC<Props> = ({ link, isOpen, onOpenChange }) 
                                           })()}
                                         </p>
                                         <div className="flex items-center gap-1.5 mt-0.5 opacity-80">
-                                            {v.location && <span className="text-[14px] leading-none">{getFlag(v.location)}</span>}
+                                            {v.location && <span className="text-[14px] leading-none">{getFlagEmoji(v.location)}</span>}
                                             <p className="text-[11px] font-medium text-slate-500 dark:text-slate-400 uppercase tracking-tighter">
                                               {v.device} {v.location ? `· ${v.location}` : ''}
                                             </p>
@@ -534,10 +521,10 @@ export const AnalyticsModal: React.FC<Props> = ({ link, isOpen, onOpenChange }) 
                                 <motion.div key={l.location} initial={{ opacity: 0, x: 8 }} animate={{ opacity: 1, x: 0 }} transition={{ delay: i * 0.05 }}
                                   className="flex items-center gap-4 px-4 py-3 rounded-xl glass-panel shadow-none border-white/20 dark:border-white/10 hover:bg-white/20 dark:hover:bg-white/10 transition-all dark:text-slate-100"
                                 >
-                                  <span className="text-lg flex-shrink-0">{getFlag(l.location)}</span>
+                                  <span className="text-xl flex-shrink-0">{getFlagEmoji(l.location)}</span>
                                   <div className="flex-1 min-w-0">
                                     <div className="flex items-center justify-between mb-1">
-                                      <p className="text-xs font-semibold text-slate-700 dark:text-slate-200 truncate">{getCountryName(l.location)}</p>
+                                      <p className="text-xs font-semibold text-slate-700 dark:text-slate-200 truncate">{l.location}</p>
                                       <span className="text-[11px] font-black text-slate-500 dark:text-slate-400 tabular-nums">{pct}%</span>
                                     </div>
                                     <div className="h-1.5 bg-slate-100 dark:bg-slate-700/50 rounded-full overflow-hidden">
