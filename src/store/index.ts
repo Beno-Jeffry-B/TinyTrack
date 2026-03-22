@@ -101,7 +101,7 @@ export const useAuthStore = create<AuthStore>()(
           return false;
         }
         try {
-          const res = await fetch(`${import.meta.env.VITE_API_URL}/auth/me`, {
+          const res = await fetch(`${import.meta.env.VITE_API_URL}/api/auth/me`, {
             headers: { Authorization: `Bearer ${token}` }
           });
           if (!res.ok) throw new Error('Session invalid');
@@ -143,7 +143,7 @@ interface LinksStore {
   fetchAnalytics: (linkId: string, range?: AnalyticsRange, date?: string) => Promise<AnalyticsData>;
 }
 
-const API = import.meta.env.VITE_API_URL;
+const API = `${import.meta.env.VITE_API_URL}/api`;
 const getToken = () => localStorage.getItem('auth_token') ?? '';
 const authHeaders = () => ({
   'Content-Type': 'application/json',
