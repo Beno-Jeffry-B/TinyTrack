@@ -17,7 +17,7 @@ router.get('/me', authMiddleware, getCurrentUser);
 // Step 1: Redirect user to Google
 router.get(
   '/google',
-  passport.authenticate('google', { scope: ['profile', 'email'], session: false })
+  passport.authenticate('google', { scope: ['profile', 'email'], prompt: 'select_account', session: false })
 );
 
 // Step 2: Google redirects here with profile

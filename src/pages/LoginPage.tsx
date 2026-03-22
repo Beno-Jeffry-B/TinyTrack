@@ -69,6 +69,7 @@ export const LoginPage: React.FC<LoginPageProps> = ({ onSwitchToSignup }) => {
   };
 
   const handleGoogleLogin = () => {
+    localStorage.removeItem('auth_token');
     window.location.href = `${import.meta.env.VITE_API_URL}/api/auth/google`;
   };
 
