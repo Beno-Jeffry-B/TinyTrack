@@ -1,6 +1,7 @@
 const { pool } = require('../config/db');
 const { generateShortCode } = require('../utils/base62');
 const geoip = require('geoip-lite');
+const QRCode = require('qrcode');
 
 const BASE_URL = process.env.SERVER_URL || 'http://localhost:5000';
 
@@ -258,4 +259,44 @@ const deleteUrl = async (req, res) => {
   }
 };
 
-module.exports = { createUrl, redirectUrl, listUrls, deleteUrl };
+// ── GET /api/url/qr/:shortCode ───────────────────────────
+// Public/Protected — returns Base64 QR code image
+const generateQRCode = async (req, res) => {
+  try {
+    const { shortCode } = req.params;
+
+    if (!shortCode) {
+      return res.status(400).json({ success: false, message: 'Short code is required' });
+    }
+
+    const url = await pool.query(
+      'SELECT * FROM urls WHERE short_code = $1 AND is_deleted = false',
+      [shortCode]
+    );
+
+    if (url.rows.length === 0) {
+      return res.status(404).json({ success: false, message: 'URL not found' });
+    }
+
+    // IMPORTANT: Always use production base URL
+    const shortUrl = `${BASE_URL}/${shortCode}`;
+
+    // Generate QR as base64
+    const qrImage = await QRCode.toDataURL(shortUrl);
+
+    return res.status(200).json({
+      success: true,
+      qr: qrImage,
+      shortUrl
+    });
+
+  } catch (error) {
+    console.error('QR generation error:', error);
+    return res.status(500).json({
+      success: false,
+      message: 'Failed to generate QR code'
+    });
+  }
+};
+
+module.exports = { createUrl, redirectUrl, listUrls, deleteUrl, generateQRCode };
