@@ -1,5 +1,6 @@
 const { pool } = require('../config/db');
 const { generateShortCode } = require('../utils/base62');
+const geoip = require('geoip-lite');
 
 const BASE_URL = process.env.SERVER_URL || 'http://localhost:5000';
 
@@ -46,11 +47,11 @@ const createUrl = async (req, res) => {
 
       // Uniqueness check
       const existing = await pool.query(
-        'SELECT id FROM urls WHERE short_code = $1',
+        'SELECT id FROM urls WHERE short_code = $1 AND is_deleted = false',
         [alias]
       );
       if (existing.rows.length > 0) {
-        return res.status(409).json({ success: false, message: `Alias "${alias}" is already taken` });
+        return res.status(400).json({ success: false, message: "Custom short URL already taken" });
       }
       short_code = alias;
     } else {
@@ -123,24 +124,6 @@ const extractIp = (req) => {
   return ip.replace(/^::ffff:/, '');
 };
 
-/**
- * Fetch country from ipapi.co with a 3-second timeout.
- * Returns a 2-letter ISO code (e.g. "IN") or "Unknown" on any failure.
- */
-const fetchCountry = async (ip) => {
-  if (!ip) return 'Unknown';
-  try {
-    const controller = new AbortController();
-    const timer = setTimeout(() => controller.abort(), 3000);
-    const res = await fetch(`https://ipapi.co/${ip}/json/`, { signal: controller.signal });
-    clearTimeout(timer);
-    if (!res.ok) return 'Unknown';
-    const data = await res.json();
-    return data?.country_code ?? 'Unknown';
-  } catch {
-    return 'Unknown';
-  }
-};
 
 // ── GET /:shortCode ──────────────────────────────────────
 // Public — redirect to original URL + track click
@@ -186,7 +169,13 @@ const redirectUrl = async (req, res) => {
     // ── Non-blocking: update DB after redirect is sent ───────────────
     (async () => {
       try {
-        const country = await fetchCountry(ip);
+        let country = "Unknown";
+        if (ip === "::1" || ip === "127.0.0.1" || ip.startsWith("local-")) {
+          country = "Localhost";
+        } else {
+          const geo = geoip.lookup(ip);
+          country = geo?.country || "Unknown";
+        }
         console.log(`[redirect] country detected: ${country} for ip=${ip ?? 'unknown'}`);
 
         await Promise.all([
