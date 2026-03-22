@@ -2,6 +2,7 @@ const { pool } = require('../config/db');
 const { generateShortCode } = require('../utils/base62');
 const geoip = require('geoip-lite');
 const QRCode = require('qrcode');
+const redisClient = require('../utils/redisClient');
 
 const BASE_URL = process.env.SERVER_URL || 'http://localhost:5000';
 
@@ -133,6 +134,29 @@ const redirectUrl = async (req, res) => {
   console.log('[redirectUrl] shortCode:', shortCode);
 
   try {
+    // === STEP 1: Check Redis cache ===
+    if (redisClient) {
+      try {
+        const cachedUrl = await redisClient.get(`url:${shortCode}`);
+        if (cachedUrl) {
+          console.log('[Redis] CACHE HIT for:', shortCode);
+          // === STEP 2: Return cached original URL immediately ===
+          res.set({
+            "Cache-Control": "no-store, no-cache, must-revalidate, proxy-revalidate",
+            "Pragma": "no-cache",
+            "Expires": "0",
+            "Surrogate-Control": "no-store"
+          });
+          return res.redirect(301, cachedUrl);
+        } else {
+          console.log('[Redis] CACHE MISS for:', shortCode);
+        }
+      } catch (redisErr) {
+        // If Redis fails -> log error and continue with DB
+        console.error('[Redis] Cache GET error (fallback to DB):', redisErr.message);
+      }
+    }
+
     const result = await pool.query(
       `SELECT * FROM urls WHERE short_code = $1 AND is_deleted = false`,
       [shortCode]
@@ -147,6 +171,16 @@ const redirectUrl = async (req, res) => {
     // Expiry check
     if (url.expires_at && new Date(url.expires_at) < new Date()) {
       return res.status(410).json({ success: false, message: 'This link has expired' });
+    }
+
+    // === STEP 3: Store result in Redis ===
+    if (redisClient) {
+      try {
+        // SET shortCode -> originalUrl with 1 hour TTL (3600 seconds)
+        await redisClient.set(`url:${shortCode}`, url.original_url, { ex: 3600 });
+      } catch (redisErr) {
+        console.error('[Redis] Cache SET error:', redisErr.message);
+      }
     }
 
     // Extract IP early so we can log it before redirect
