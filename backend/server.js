@@ -9,7 +9,12 @@ const { connectDB } = require('./config/db');
 const PORT = process.env.PORT || 5000;
 
 const server = http.createServer(app);
-const io = new Server(server, { cors: { origin: '*' } });
+const io = new Server(server, {
+  cors: {
+    origin: process.env.FRONTEND_URL,
+    methods: ["GET", "POST"],
+  },
+});
 
 app.set('io', io);
 
@@ -29,7 +34,7 @@ io.on('connection', (socket) => {
 const start = async () => {
   await connectDB();
   server.listen(PORT, () => {
-    console.log(`🚀 TinyTrack API running on http://localhost:${PORT}`);
+    console.log(`🚀 TinyTrack API running on port ${PORT}`);
   });
 };
 

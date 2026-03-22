@@ -24,7 +24,7 @@ import toast from 'react-hot-toast';
 import { Background } from './components/ui/Background';
 import { io } from 'socket.io-client';
 
-const socket = io(import.meta.env.VITE_API_URL || 'http://localhost:5000');
+const socket = io(import.meta.env.VITE_API_URL);
 
 // ── Dashboard ──────────────────────────────────────────────────────────
 function Dashboard() {

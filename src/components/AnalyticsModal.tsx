@@ -17,7 +17,7 @@ import { useMediaQuery } from '../hooks/useMediaQuery';
 import { io } from 'socket.io-client';
 import { AreaChart, Area, XAxis, Tooltip, ResponsiveContainer } from 'recharts';
 
-const socket = io(import.meta.env.VITE_API_URL || 'http://localhost:5000');
+const socket = io(import.meta.env.VITE_API_URL);
 
 interface Props {
   link: LinkData | null;

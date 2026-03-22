@@ -1,9 +1,10 @@
 const { Pool } = require('pg');
 
-// Local PostgreSQL — no SSL needed
 const pool = new Pool({
   connectionString: process.env.DATABASE_URL,
-  ssl: false,
+  ssl: process.env.NODE_ENV === "production"
+    ? { require: true, rejectUnauthorized: false }
+    : false,
 });
 
 /**
@@ -16,9 +17,7 @@ const connectDB = async () => {
     console.log(`✅ PostgreSQL connected — server time: ${result.rows[0].now}`);
   } catch (err) {
     console.error('❌ Database connection failed:');
-    console.error('  message:', err.message || '(no message)');
-    console.error('  code   :', err.code);
-    console.error('  full   :', err);
+    console.error('DB ERROR:', err);
     process.exit(1);
   }
 };

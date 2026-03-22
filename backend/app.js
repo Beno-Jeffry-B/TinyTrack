@@ -7,10 +7,9 @@ const authRoutes = require('./routes/authRoutes');
 const app = express();
 
 // ── Middleware ──────────────────────────────────────────
+app.set("trust proxy", 1);
 app.use(cors({
-  origin: process.env.FRONTEND_URL || 'http://localhost:5173',
-  methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
-  allowedHeaders: ['Content-Type', 'Authorization'],
+  origin: process.env.FRONTEND_URL,
   credentials: true,
 }));
 app.use(express.json());

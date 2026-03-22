@@ -99,8 +99,7 @@ const createUrl = async (req, res) => {
     return res.status(201).json({ success: true, message: 'Short URL created successfully', data: response });
 
   } catch (err) {
-    console.error('[createUrl] DB error:', err.message);
-    console.error('[createUrl] stack:', err.stack);
+    console.error('DB ERROR:', err);
     return res.status(500).json({ success: false, message: 'Server error: ' + err.message });
   }
 };
@@ -111,7 +110,10 @@ const createUrl = async (req, res) => {
  * Returns null for loopback / unresolvable addresses.
  */
 const extractIp = (req) => {
-  let ip = req.headers["x-forwarded-for"]?.split(",")[0]?.trim() || req.socket?.remoteAddress || "unknown";
+  let ip =
+    req.headers["x-forwarded-for"]?.split(",")[0] ||
+    req.socket.remoteAddress ||
+    "unknown";
 
   if (ip === "::1" || ip === "127.0.0.1") {
     ip = "local-" + req.headers["user-agent"];
@@ -214,7 +216,7 @@ const redirectUrl = async (req, res) => {
     })();
 
   } catch (err) {
-    console.error('[redirectUrl] error:', err.message);
+    console.error('DB ERROR:', err);
     return res.status(500).json({ success: false, message: 'Server error' });
   }
 };
@@ -238,7 +240,7 @@ const listUrls = async (req, res) => {
       short_url: `${BASE_URL}/${url.short_code}`,
     })));
   } catch (err) {
-    console.error('[listUrls] error:', err.message);
+    console.error('DB ERROR:', err);
     return res.status(500).json({ success: false, message: 'Server error' });
   }
 };
