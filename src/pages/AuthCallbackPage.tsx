@@ -39,7 +39,7 @@ export const AuthCallbackPage = () => {
       };
 
       // Persist token for future API calls
-      localStorage.setItem('auth_token', token);
+      localStorage.setItem('token', token);
 
       // Log user into Zustand (triggers dashboard render)
       login(user);

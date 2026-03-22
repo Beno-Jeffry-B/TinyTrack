@@ -60,7 +60,7 @@ export const SignupPage: React.FC<SignupPageProps> = ({ onSwitchToLogin }) => {
       if (!res.ok) throw new Error(data.message || data.error || 'Signup failed');
 
       const userData = data.data ?? data;
-      localStorage.setItem('auth_token', userData.token);
+      localStorage.setItem('token', userData.token);
       login({
         id: userData.user.id,
         name: userData.user.email.split('@')[0],
@@ -77,6 +77,7 @@ export const SignupPage: React.FC<SignupPageProps> = ({ onSwitchToLogin }) => {
   };
 
   const handleGoogleSignup = () => {
+    localStorage.removeItem('token');
     localStorage.removeItem('auth_token');
     window.location.href = `${import.meta.env.VITE_API_URL}/api/auth/google`;
   };

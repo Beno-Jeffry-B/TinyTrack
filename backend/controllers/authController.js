@@ -115,10 +115,18 @@ const login = async (req, res) => {
 
 // ── GET /api/auth/me ─────────────────────────────────────
 const getCurrentUser = async (req, res) => {
+  const token = req.headers.authorization?.split(" ")[1];
+
+  if (!token) {
+    return res.status(401).json({ success: false, message: "Unauthorized" });
+  }
+
   try {
+    const decoded = jwt.verify(token, process.env.JWT_SECRET);
+    
     const result = await pool.query(
       'SELECT id, email, created_at FROM users WHERE id = $1',
-      [req.user.userId]
+      [decoded.userId || decoded.id] // Support legacy or new token shapes
     );
 
     if (result.rows.length === 0) {
@@ -132,7 +140,7 @@ const getCurrentUser = async (req, res) => {
     });
   } catch (err) {
     console.error('[getCurrentUser]', err.message);
-    return res.status(500).json({ success: false, message: 'Server error' });
+    return res.status(401).json({ success: false, message: "Invalid token" });
   }
 };
 

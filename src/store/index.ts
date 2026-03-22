@@ -1,5 +1,4 @@
 import { create } from 'zustand';
-import { persist } from 'zustand/middleware';
 import type { User, LinkData, CsvResult } from '../types';
 
 // ── Analytics types ────────────────────────────────────────────────────
@@ -85,47 +84,44 @@ interface AuthStore {
   verifySession: () => Promise<boolean>;
 }
 
-export const useAuthStore = create<AuthStore>()(
-  persist(
-    (set) => ({
-      user: null,
-      login: (user) => set({ user }),
-      logout: () => {
-        set({ user: null });
-        localStorage.removeItem('auth_token');
-      },
-      verifySession: async () => {
-        const token = localStorage.getItem('auth_token');
-        if (!token) {
-          set({ user: null });
-          return false;
+export const useAuthStore = create<AuthStore>()((set) => ({
+  user: null,
+  login: (user) => set({ user }),
+  logout: () => {
+    set({ user: null });
+    localStorage.removeItem('token');
+    localStorage.removeItem('auth_token'); // Clear stale legacy tokens
+    localStorage.removeItem('auth-store'); // Clear stale legacy Zustand caches
+  },
+  verifySession: async () => {
+    const token = localStorage.getItem('token');
+    if (!token) {
+      set({ user: null });
+      return false;
+    }
+    try {
+      const res = await fetch(`${import.meta.env.VITE_API_URL}/api/auth/me`, {
+        headers: { Authorization: `Bearer ${token}` }
+      });
+      if (!res.ok) throw new Error('Session invalid');
+      const { data } = await res.json();
+      set({ 
+        user: {
+          id: data.user.id,
+          name: data.user.email.split('@')[0],
+          email: data.user.email,
+          avatar: `https://api.dicebear.com/8.x/avataaars/svg?seed=${encodeURIComponent(data.user.email)}`,
+          provider: 'credentials'
         }
-        try {
-          const res = await fetch(`${import.meta.env.VITE_API_URL}/api/auth/me`, {
-            headers: { Authorization: `Bearer ${token}` }
-          });
-          if (!res.ok) throw new Error('Session invalid');
-          const { data } = await res.json();
-          set({ 
-            user: {
-              id: data.user.id,
-              name: data.user.email.split('@')[0],
-              email: data.user.email,
-              avatar: `https://api.dicebear.com/8.x/avataaars/svg?seed=${encodeURIComponent(data.user.email)}`,
-              provider: 'credentials' // defaulting remote fetch provider assumption
-            }
-          });
-          return true;
-        } catch {
-          set({ user: null });
-          localStorage.removeItem('auth_token');
-          return false;
-        }
-      }
-    }),
-    { name: 'auth-store' }
-  )
-);
+      });
+      return true;
+    } catch {
+      set({ user: null });
+      localStorage.removeItem('token');
+      return false;
+    }
+  }
+}));
 
 // ── Links store ───────────────────────────────────────────────────────
 interface LinksStore {
@@ -144,7 +140,7 @@ interface LinksStore {
 }
 
 const API = `${import.meta.env.VITE_API_URL}/api`;
-const getToken = () => localStorage.getItem('auth_token') ?? '';
+const getToken = () => localStorage.getItem('token') ?? '';
 const authHeaders = () => ({
   'Content-Type': 'application/json',
   'Authorization': `Bearer ${getToken()}`,
