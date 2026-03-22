@@ -1,15 +1,15 @@
 const countryCodeMap: Record<string, string> = {
-  India: "IN",
-  Spain: "ES",
-  "United States": "US",
-  Germany: "DE",
-  France: "FR",
-  Canada: "CA",
-  Australia: "AU",
-  China: "CN",
-  Japan: "JP",
-  Brazil: "BR",
-  "United Kingdom": "GB",
+  India: "🇮🇳",
+  Spain: "🇪🇸",
+  "United States": "🇺🇸",
+  Germany: "🇩🇪",
+  France: "🇫🇷",
+  Canada: "🇨🇦",
+  Australia: "🇦🇺",
+  China: "🇨🇳",
+  Japan: "🇯🇵",
+  Brazil: "🇧🇷",
+  "United Kingdom": "🇬🇧",
 };
 
 export const getFlagEmoji = (country: string): string => {
