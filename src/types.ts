@@ -33,18 +33,5 @@ export interface AuthState {
   isLoading: boolean;
 }
 
-export interface CsvRow {
-  originalUrl: string;
-  alias?: string;
-  expiryDate?: string;
-}
-
-export interface CsvResult {
-  row: CsvRow;
-  success: boolean;
-  shortUrl?: string;
-  error?: string;
-}
-
 export type DeviceBreakdown = { device: string; count: number }[];
 export type LocationBreakdown = { location: string; count: number }[];

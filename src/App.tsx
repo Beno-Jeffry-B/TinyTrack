@@ -9,13 +9,12 @@ import { GlassSelect } from './components/ui/GlassSelect';
 import { GlassDatePicker } from './components/ui/GlassDatePicker';
 import { AnalyticsModal } from './components/AnalyticsModal';
 import { AddLinkModal } from './components/AddLinkModal';
-import { CsvUploadModal } from './components/CsvUploadModal';
 import { DashboardSkeletons } from './components/Skeletons';
 import type { LinkData } from './types';
 import { motion, AnimatePresence } from 'framer-motion';
 import {
   Plus, LogOut, Sun, Moon,
-  Search, UploadCloud, ArrowUpDown, RefreshCw
+  Search, ArrowUpDown, RefreshCw
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Toaster } from 'react-hot-toast';
@@ -34,7 +33,6 @@ function Dashboard() {
   const [selectedLink, setSelectedLink] = useState<LinkData | null>(null);
   const [searchQuery, setSearchQuery] = useState('');
   const [showAdd, setShowAdd] = useState(false);
-  const [showCsv, setShowCsv] = useState(false);
   const [fetchError, setFetchError] = useState(false);
   const [sortOption, setSortOption] = useState<'clicks-desc' | 'clicks-asc' | 'date-desc' | 'visit-desc'>('date-desc');
   const [dateFrom, setDateFrom] = useState('');
@@ -145,9 +143,6 @@ function Dashboard() {
             <button onClick={toggleTheme} className="p-2.5 rounded-xl glass-panel text-slate-700 dark:text-slate-200 transition-all hover:brightness-110" title="Toggle theme">
               {theme === 'dark' ? <Sun size={16} /> : <Moon size={16} />}
             </button>
-            <Button variant="outline" className="rounded-xl gap-2 glass-panel text-slate-900 dark:text-slate-100 shadow-sm h-10 hover:brightness-110 border-transparent hover:border-transparent bg-transparent hover:bg-transparent" onClick={() => setShowCsv(true)}>
-              <UploadCloud size={16} /> CSV
-            </Button>
             <Button className="bg-slate-900 hover:bg-slate-800 dark:bg-white dark:hover:bg-slate-200 dark:text-slate-900 text-white font-bold rounded-xl px-5 gap-2 shadow-[0_8px_32px_rgba(31,38,135,0.2)] dark:shadow-[0_8px_32px_rgba(255,255,255,0.15)] h-10 group transition-all" onClick={() => setShowAdd(true)}>
               <Plus size={18} className="stroke-[3] group-hover:rotate-90 transition-transform duration-300" />
               Add URL
@@ -271,7 +266,6 @@ function Dashboard() {
         onOpenChange={(open) => !open && setSelectedLink(null)}
       />
       <AddLinkModal isOpen={showAdd} onClose={() => setShowAdd(false)} />
-      <CsvUploadModal isOpen={showCsv} onClose={() => setShowCsv(false)} />
     </div>
   );
 }

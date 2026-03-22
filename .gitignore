@@ -42,3 +42,6 @@ dist-ssr/
 
 # Vite specific
 v-*.json
+
+#testing files
+k6-tests
