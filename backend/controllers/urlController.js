@@ -134,74 +134,65 @@ const redirectUrl = async (req, res) => {
   console.log('[redirectUrl] shortCode:', shortCode);
 
   try {
+    let originalUrl = null;
+
     // === STEP 1: Check Redis cache ===
     if (redisClient) {
       try {
         const cachedUrl = await redisClient.get(`url:${shortCode}`);
         if (cachedUrl) {
-          console.log('[Redis] CACHE HIT for:', shortCode);
-          // === STEP 2: Return cached original URL immediately ===
-          res.set({
-            "Cache-Control": "no-store, no-cache, must-revalidate, proxy-revalidate",
-            "Pragma": "no-cache",
-            "Expires": "0",
-            "Surrogate-Control": "no-store"
-          });
-          return res.redirect(301, cachedUrl);
+          console.log('REDIS HIT / MISS: HIT');
+          originalUrl = cachedUrl;
         } else {
-          console.log('[Redis] CACHE MISS for:', shortCode);
+          console.log('REDIS HIT / MISS: MISS');
         }
       } catch (redisErr) {
-        // If Redis fails -> log error and continue with DB
-        console.error('[Redis] Cache GET error (fallback to DB):', redisErr.message);
+        console.error('[Redis] Cache GET error:', redisErr.message);
       }
     }
 
-    const result = await pool.query(
-      `SELECT * FROM urls WHERE short_code = $1 AND is_deleted = false`,
-      [shortCode]
-    );
+    // === STEP 2: Fetch from DB if not in cache ===
+    if (!originalUrl) {
+      const result = await pool.query(
+        `SELECT * FROM urls WHERE short_code = $1 AND is_deleted = false`,
+        [shortCode]
+      );
 
-    if (result.rows.length === 0) {
-      return res.status(404).json({ success: false, message: 'Short URL not found' });
-    }
+      if (result.rows.length === 0) {
+        return res.status(404).json({ success: false, message: 'Short URL not found' });
+      }
 
-    const url = result.rows[0];
+      const url = result.rows[0];
 
-    // Expiry check
-    if (url.expires_at && new Date(url.expires_at) < new Date()) {
-      return res.status(410).json({ success: false, message: 'This link has expired' });
-    }
+      if (url.expires_at && new Date(url.expires_at) < new Date()) {
+        return res.status(410).json({ success: false, message: 'This link has expired' });
+      }
 
-    // === STEP 3: Store result in Redis ===
-    if (redisClient) {
-      try {
-        // SET shortCode -> originalUrl with 1 hour TTL (3600 seconds)
-        await redisClient.set(`url:${shortCode}`, url.original_url, { ex: 3600 });
-      } catch (redisErr) {
-        console.error('[Redis] Cache SET error:', redisErr.message);
+      originalUrl = url.original_url;
+
+      // === STEP 3: Store result in Redis ===
+      if (redisClient) {
+        try {
+          await redisClient.set(`url:${shortCode}`, originalUrl, { ex: 3600 });
+        } catch (redisErr) {
+          console.error('[Redis] Cache SET error:', redisErr.message);
+        }
       }
     }
 
-    // Extract IP early so we can log it before redirect
+    // === STEP 4: Redirect immediately ===
     const ip = extractIp(req);
     const userAgent = req.headers['user-agent'] || null;
-    console.log(`[redirect] ip: ${ip}`);
-    console.log(`[redirect] userAgent: ${userAgent}`);
 
-    // ── REDIRECT IMMEDIATELY — do NOT wait for geolocation ──────────
-    console.log('[redirectUrl] redirecting to:', url.original_url);
-    
-    // Prevent browser caching of the redirect so every hit counts
     res.set({
       "Cache-Control": "no-store, no-cache, must-revalidate, proxy-revalidate",
       "Pragma": "no-cache",
       "Expires": "0",
       "Surrogate-Control": "no-store"
     });
-    res.redirect(301, url.original_url);
+    res.redirect(301, originalUrl);
 
-    // ── Non-blocking: update DB after redirect is sent ───────────────
+    // === STEP 5: Always track click ===
     (async () => {
       try {
         let country = "Unknown";
@@ -211,28 +202,28 @@ const redirectUrl = async (req, res) => {
           const geo = geoip.lookup(ip);
           country = geo?.country || "Unknown";
         }
-        console.log(`[redirect] country detected: ${country} for ip=${ip ?? 'unknown'}`);
 
-        await Promise.all([
-          pool.query(
-            'UPDATE urls SET clicks = clicks + 1 WHERE id = $1',
-            [url.id]
-          ),
-          pool.query(
+        // Always increment urls.clicks, even if cached
+        const updateRes = await pool.query(
+          'UPDATE urls SET clicks = clicks + 1 WHERE short_code = $1 RETURNING id',
+          [shortCode]
+        );
+
+        if (updateRes.rows.length > 0) {
+          const fetchedUrlId = updateRes.rows[0].id;
+          await pool.query(
             'INSERT INTO clicks (url_id, ip, user_agent, country) VALUES ($1, $2, $3, $4)',
-            [url.id, ip, userAgent, country]
-          ),
-        ]);
-        
-        console.log(`[redirect] click inserted`);
-        
-        const io = req.app.get('io');
-        if (io) {
-          io.to(`url_${url.id}`).emit('click_update', {
-            urlId: String(url.id),
-            timestamp: new Date()
-          });
-          console.log(`[socket] Emitted click_update for url_${url.id}`);
+            [fetchedUrlId, ip, userAgent, country]
+          );
+          console.log(`CLICK RECORDED`);
+
+          const io = req.app.get('io');
+          if (io) {
+            io.to(`url_${fetchedUrlId}`).emit('click_update', {
+              urlId: String(fetchedUrlId),
+              timestamp: new Date()
+            });
+          }
         }
       } catch (trackErr) {
         console.error('[redirect] click tracking error:', trackErr.message);
@@ -240,7 +231,7 @@ const redirectUrl = async (req, res) => {
     })();
 
   } catch (err) {
-    console.error('DB ERROR:', err);
+    console.error('SERVER ERROR:', err);
     return res.status(500).json({ success: false, message: 'Server error' });
   }
 };
