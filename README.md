@@ -11,10 +11,8 @@ This isn't just a basic URL shortener. It includes real-time analytics, user aut
 
 ---
 
-## 🎥 Demo Video
-
-*(Placeholder: Add a link to the Loom/YouTube walkthrough here)*
-
+## 🎥 Demo Video :  [Click me](https://drive.google.com/file/d/1D6RCT29BTUN80kV6f6w1dn_QSDHPiACK/view?usp=sharing)
+ 
 ---
 
 
